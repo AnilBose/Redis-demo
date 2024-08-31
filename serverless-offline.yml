@@ -1,0 +1,90 @@
+service: redis-example-offline
+frameworkVersion: "3"
+custom:
+  redisTableName: redisTable
+  snsTopic: arn:aws:sns:us-east-1:000000000000:MyTopic
+  dynamodb:
+    stages:
+      - dev
+    start:
+      port: 8000
+      inMemory: true
+      migrate: true
+      noStart: true
+    migration:
+      dir: offline/migrations
+plugins:
+  - serverless-plugin-optimize
+  - serverless-dynamodb-local
+  - serverless-offline
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  environment:
+    REDIS_TABLE: ${self:custom.redisTableName}
+    SNS_TOPIC_ARN: ${self:custom.snsTopic}
+
+functions:
+  publisher:
+    handler: handler.publisher
+    memorySize: 512
+    timeout: 60
+    environment:
+      REDIS_PORT: 6379
+      REDIS_HOST: localhost
+    events:
+      - httpApi: POST /publish
+
+  subscriber:
+    handler: handler.subscriber
+    memorySize: 512
+    timeout: 60
+    environment:
+      REDIS_PORT: 6379
+      REDIS_HOST: localhost
+    events:
+      - httpApi: GET /subscribe
+      - sns: ${self:custom.snsTopic}
+
+  writeCache:
+    handler: handler.writeCache
+    memorySize: 512
+    timeout: 60
+    environment:
+      REDIS_PORT: 6379
+      REDIS_HOST: localhost
+    events:
+      - httpApi: POST /write-cache
+
+  getCache:
+    handler: handler.getCache
+    environment:
+      REDIS_PORT: 6379 # Use the default port for local Redis
+      REDIS_HOST: localhost # Use localhost for local Redis
+    events:
+      - httpApi: GET /get-cache
+
+  deleteCache:
+    handler: handler.deleteCache
+    environment:
+      REDIS_PORT: 6379 # Use the default port for local Redis
+      REDIS_HOST: localhost # Use localhost for local Redis
+    events:
+      - httpApi: DELETE /delete-cache
+# ... (VPC and other configurations remain the same)
+
+resources:
+  Resources:
+    RedisTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.redisTableName}
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH

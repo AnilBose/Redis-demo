@@ -1,0 +1,23 @@
+{
+  "scripts": {
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "sls:deploy": "sls deploy -c serverless.yml",
+    "sls:offline": "sls offline -c serverless-offline.yml"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1542.0",
+    "dynamoose": "^2.8.6",
+    "redis": "^4.6.12",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "serverless-dynamodb-local": "^0.2.40",
+    "serverless-localstack": "^1.2.0",
+    "serverless-offline": "^13.3.3",
+    "serverless-plugin-optimize": "^4.2.1-rc.1"
+  }
+}

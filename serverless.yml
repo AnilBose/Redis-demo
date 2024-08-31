@@ -1,0 +1,193 @@
+service: redis-example
+frameworkVersion: "3"
+
+custom:
+  redisTableName: redisTable
+  # userTopic: ${self:service}-user-sns
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  environment:
+    REDIS_TABLE: ${self:custom.redisTableName}
+    # USER_SNS: !Ref UserSNSTopic
+  iam:
+    role:
+      managedPolicies:
+        - "arn:aws:iam::aws:policy/AmazonElastiCacheFullAccess"
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonSNSFullAccess"
+
+functions:
+  publisher:
+    handler: handler.publisher
+    memorySize: 512
+    timeout: 60
+    environment:
+      REDIS_PORT: !GetAtt MyElasticacheCluster.RedisEndpoint.Port
+      REDIS_HOST: !GetAtt MyElasticacheCluster.RedisEndpoint.Address
+    events:
+      - httpApi: POST /publish
+    vpc:
+      securityGroupIds:
+        - !GetAtt MyLambdaSecurityGroup.GroupId
+      subnetIds:
+        - !Ref MySubnet
+  subscriber:
+    handler: handler.subscriber
+    memorySize: 512
+    timeout: 60
+    environment:
+      REDIS_PORT: !GetAtt MyElasticacheCluster.RedisEndpoint.Port
+      REDIS_HOST: !GetAtt MyElasticacheCluster.RedisEndpoint.Address
+    events:
+      - httpApi: GET /subscribe
+
+    vpc:
+      securityGroupIds:
+        - !GetAtt MyLambdaSecurityGroup.GroupId
+      subnetIds:
+        - !Ref MySubnet
+  writeCache:
+    handler: handler.writeCache
+    memorySize: 512
+    timeout: 60
+    environment:
+      REDIS_PORT: !GetAtt MyElasticacheCluster.RedisEndpoint.Port
+      REDIS_HOST: !GetAtt MyElasticacheCluster.RedisEndpoint.Address
+    events:
+      - httpApi: POST /write-cache
+    vpc:
+      securityGroupIds:
+        - !GetAtt MyLambdaSecurityGroup.GroupId
+      subnetIds:
+        - !Ref MySubnet
+  getCache:
+    handler: handler.getCache
+    environment:
+      REDIS_PORT: !GetAtt MyElasticacheCluster.RedisEndpoint.Port
+      REDIS_HOST: !GetAtt MyElasticacheCluster.RedisEndpoint.Address
+    events:
+      - httpApi: GET /get-cache
+    vpc:
+      securityGroupIds:
+        - !GetAtt MyLambdaSecurityGroup.GroupId
+      subnetIds:
+        - !Ref MySubnet
+  deleteCache:
+    handler: handler.deleteCache
+    environment:
+      REDIS_PORT: !GetAtt MyElasticacheCluster.RedisEndpoint.Port
+      REDIS_HOST: !GetAtt MyElasticacheCluster.RedisEndpoint.Address
+    events:
+      - httpApi: DELETE /get-cache
+    vpc:
+      securityGroupIds:
+        - !GetAtt MyLambdaSecurityGroup.GroupId
+      subnetIds:
+        - !Ref MySubnet
+
+resources:
+  Resources:
+    MyVPC:
+      Type: "AWS::EC2::VPC"
+      Properties:
+        CidrBlock: "10.0.0.0/16"
+        # EnableDnsSupport: true
+        # EnableDnsHostnames: true
+
+    MySubnet:
+      Type: "AWS::EC2::Subnet"
+      Properties:
+        VpcId: !Ref MyVPC
+        CidrBlock: "10.0.1.0/24"
+
+    MyRouteTable:
+      Type: "AWS::EC2::RouteTable"
+      Properties:
+        VpcId: !Ref MyVPC
+
+    MySubnetRouteTableAssociation:
+      Type: "AWS::EC2::SubnetRouteTableAssociation"
+      Properties:
+        SubnetId: !Ref MySubnet
+        RouteTableId: !Ref MyRouteTable
+
+    MyLambdaSecurityGroup:
+      Type: "AWS::EC2::SecurityGroup"
+      Properties:
+        GroupDescription: "Lambda function security group"
+        VpcId: !Ref MyVPC
+
+    MyElasticacheSecurityGroup:
+      Type: "AWS::EC2::SecurityGroup"
+      Properties:
+        GroupDescription: "ElastiCache security group"
+        VpcId: !Ref MyVPC
+        SecurityGroupIngress:
+          - IpProtocol: "tcp" # Specify TCP protocol
+            FromPort: "6379" # Port 6379
+            ToPort: "6379" # Port 6379
+            CidrIp: "10.0.1.0/24"
+
+    MyElasticacheSubnetGroup:
+      Type: "AWS::ElastiCache::SubnetGroup"
+      Properties:
+        Description: "Subnet Group for ElastiCache"
+        SubnetIds:
+          - !Ref MySubnet
+        CacheSubnetGroupName: "MyElasticacheSubnetGroupNew"
+
+    MyElasticacheCluster:
+      Type: "AWS::ElastiCache::CacheCluster"
+      Properties:
+        CacheNodeType: "cache.t2.micro"
+        Engine: "redis"
+        NumCacheNodes: "1"
+        CacheSubnetGroupName: !Ref MyElasticacheSubnetGroup
+        VpcSecurityGroupIds:
+          - !GetAtt MyElasticacheSecurityGroup.GroupId
+
+    RedisTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.redisTableName}
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+    DynamoDBVPCEndpoint:
+      Type: "AWS::EC2::VPCEndpoint"
+      Properties:
+        VpcId: !Ref MyVPC
+        ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
+        VpcEndpointType: Gateway
+        RouteTableIds:
+          - !Ref MyRouteTable
+
+    # UserSNSTopic:
+    #   Type: "AWS::SNS::Topic"
+    #   Properties:
+    #     TopicName: ${self:custom.userTopic}
+    # UserSNSTopicSubscription:
+    #   Type: "AWS::SNS::Subscription"
+    #   Properties:
+    #     Endpoint: !GetAtt SubscriberLambdaFunction.Arn
+    #     Protocol: lambda
+    #     TopicArn: !Ref UserSNSTopic
+
+    # MySNSEndpoint:
+    #   Type: "AWS::EC2::VPCEndpoint"
+    #   Properties:
+    #     VpcId: !Ref MyVPC
+    #     ServiceName: !Sub "com.amazonaws.${AWS::Region}.sns"
+    #     VpcEndpointType: Interface
+    #     PrivateDnsEnabled: true
+    #     SubnetIds:
+    #       - !Ref MySubnet
+    #     SecurityGroupIds:
+    #       - !GetAtt MyLambdaSecurityGroup.GroupId
